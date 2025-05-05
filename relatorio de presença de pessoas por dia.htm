@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Gerar Relatório com Filtro de Departamento e Busca Avançada por Nome</title>
+<style>
+  body { font-family: sans-serif; }
+  .filter-section { margin-bottom: 20px; }
+  .search-section { margin-bottom: 15px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+  th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+  th { background-color: #f2f2f2; }
+  tfoot { font-weight: bold; }
+</style>
+</head>
+<body>
+
+  <h1>Selecione os arquivos Excel para processar</h1>
+
+  <input type="file" id="excelFiles" multiple accept=".xlsx, .xls">
+  <button onclick="processFiles()">Gerar Relatório</button>
+
+  <div id="status"></div>
+
+  <div class="search-section">
+    <h2>Buscar por Nome:</h2>
+    <input type="text" id="nameSearch" placeholder="Digite parte do nome (em qualquer ordem)...">
+  </div>
+
+  <div class="filter-section">
+    <h2>Filtrar por Departamento:</h2>
+    <div>
+      <input type="checkbox" id="selectAllDepartments">
+      <label for="selectAllDepartments">Selecionar Todos</label>
+    </div>
+    <div id="departmentFilters">
+    </div>
+  </div>
+
+  <div id="reportContainer"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script>
+    let allRawDataGlobal = []; // Variável para armazenar os dados brutos para a busca
+
+    async function processFiles() {
+      const fileInput = document.getElementById('excelFiles');
+      const files = fileInput.files;
+      const reportContainer = document.getElementById('reportContainer');
+      const statusDiv = document.getElementById('status');
+      const departmentFiltersDiv = document.getElementById('departmentFilters');
+      const selectAllCheckbox = document.getElementById('selectAllDepartments');
+      const nameSearchInput = document.getElementById('nameSearch');
+
+      if (files.length === 0) {
+        statusDiv.innerText = 'Nenhum arquivo selecionado.';
+        return;
+      }
+
+      statusDiv.innerText = 'Processando arquivos...';
+      reportContainer.innerHTML = '';
+      departmentFiltersDiv.innerHTML = '';
+      selectAllCheckbox.checked = true;
+      nameSearchInput.value = '';
+      nameSearchInput.addEventListener('input', () => generateReport());
+
+      allRawDataGlobal = [];
+      const allDepartments = new Set();
+
+      async function readFileData(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            resolve(jsonData);
+          };
+          reader.onerror = function(error) {
+            reject(error);
+          };
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
+      for (const file of files) {
+        statusDiv.innerText = `Lendo arquivo: ${file.name}`;
+        try {
+          const rawData = await readFileData(file);
+          if (rawData && rawData.length > 1) {
+            allRawDataGlobal.push(rawData);
+            console.log(`Arquivo ${file.name} lido com ${rawData.length} linhas (incluindo cabeçalho).`); // LOG
+            for (let i = 1; i < rawData.length; i++) {
+              const row = rawData[i];
+              const department = String(row[11]).trim();
+              if (department) {
+                allDepartments.add(department);
+              }
+            }
+          } else {
+            statusDiv.innerText = `Arquivo ${file.name}: Nenhum dado encontrado além do cabeçalho.`;
+          }
+        } catch (error) {
+          statusDiv.innerText = `Erro ao ler o arquivo ${file.name}: ${error.message}`;
+          console.error('Erro ao ler arquivo:', file.name, error);
+          return;
+        }
+      }
+
+      const sortedDepartments = Array.from(allDepartments).sort();
+      sortedDepartments.forEach(dept => {
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `dept-${dept.replace(/[^a-zA-Z0-9]/g, '')}`;
+        checkbox.value = dept;
+        checkbox.checked = true;
+        checkbox.addEventListener('change', () => generateReport());
+
+        const label = document.createElement('label');
+        label.htmlFor = checkbox.id;
+        label.textContent = dept;
+
+        departmentFiltersDiv.appendChild(checkbox);
+        departmentFiltersDiv.appendChild(label);
+        departmentFiltersDiv.appendChild(document.createElement('br'));
+      });
+
+      selectAllCheckbox.addEventListener('change', function() {
+        const allDeptCheckboxes = document.querySelectorAll('#departmentFilters input[type="checkbox"]');
+        allDeptCheckboxes.forEach(checkbox => {
+          checkbox.checked = this.checked;
+        });
+        generateReport();
+      });
+
+      generateReport();
+    }
+
+    function generateReport() {
+  const reportContainer = document.getElementById('reportContainer');
+  reportContainer.innerHTML = '';
+  const presenceData = {};
+  const allDates = new Set();
+  const selectedDepartments = Array.from(document.querySelectorAll('#departmentFilters input[type="checkbox"]:checked'))
+    .map(cb => cb.value);
+  const searchTerm = document.getElementById('nameSearch').value.toLowerCase().trim();
+  const searchWords = searchTerm.split(/\s+/).filter(word => word.length > 0);
+
+  for (const rawDataOfFile of allRawDataGlobal) {
+    if (rawDataOfFile && rawDataOfFile.length > 1) {
+      for (let i = 1; i < rawDataOfFile.length; i++) {
+        const row = rawDataOfFile[i];
+
+        // Verifique se a linha atual é "nome sobrenome" (ignorando case e espaços)
+        const nomeCompletoLinha = `${String(row[7]).trim().toLowerCase()} ${String(row[8]).trim().toLowerCase()}`.trim();
+        if (nomeCompletoLinha === 'nome sobrenome') {
+          continue; // Pula esta iteração e vai para a próxima linha
+        }
+
+        const department = String(row[11]).trim();
+        const namePart1 = String(row[7]).trim().toLowerCase();
+        const namePart2 = String(row[8]).trim().toLowerCase();
+        const fullName = `${namePart1} ${namePart2}`.trim();
+        const dateRaw = row[1];
+
+        let nameMatch = true;
+        if (searchWords.length > 0) {
+          nameMatch = searchWords.every(word => fullName.includes(word));
+        }
+
+        if (fullName && dateRaw && selectedDepartments.includes(department) && nameMatch) {
+          const formattedDate = formatDate(dateRaw);
+          if (!presenceData[fullName]) {
+            presenceData[fullName] = {};
+          }
+          presenceData[fullName][formattedDate] = 1;
+          allDates.add(formattedDate);
+        }
+      }
+    }
+  }
+
+  if (Object.keys(presenceData).length > 0) {
+    const table = document.createElement('table');
+    const headerRow = table.createTHead().insertRow();
+    const body = table.createTBody();
+    const footerRow = table.createTFoot().insertRow();
+    let totalPessoas = 0;
+
+    const sortedDates = Array.from(allDates).sort();
+
+    headerRow.insertCell().innerText = 'Nome';
+    sortedDates.forEach(date => headerRow.insertCell().innerText = date);
+    headerRow.insertCell().innerText = 'Total';
+
+    for (const name in presenceData) {
+      const row = body.insertRow();
+      row.insertCell().innerText = name;
+      let total = 0;
+      sortedDates.forEach(date => {
+        const present = presenceData[name][date] || 0;
+        row.insertCell().innerText = present;
+        total += present;
+      });
+      row.insertCell().innerText = total;
+      totalPessoas++;
+    }
+
+    // Adicionar a linha de total
+    const totalCellLabel = footerRow.insertCell();
+    totalCellLabel.colSpan = sortedDates.length + 1; // Colspan para cobrir as colunas de data
+    totalCellLabel.innerText = 'Total de Pessoas:';
+    const totalCellValue = footerRow.insertCell();
+    totalCellValue.innerText = totalPessoas;
+
+    reportContainer.appendChild(table);
+  } else {
+    reportContainer.innerText = 'Nenhum registro encontrado com os filtros selecionados.';
+  }
+}
+
+    function formatDate(date) {
+      try {
+        const dateObj = new Date(date);
+        if (!isNaN(dateObj)) {
+          const day = String(dateObj.getDate()).padStart(2, '0');
+          const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+          const year = dateObj.getFullYear();
+          return `${day}/${month}/${year}`;
+        }
+      } catch (e) {
+        const parts1 = String(date).split('/');
+        if (parts1.length === 3) {
+          return `${parts1[0].padStart(2, '0')}/${parts1[1].padStart(2, '0')}/${parts1[2]}`;
+        }
+        const parts2 = String(date).split('-');
+        if (parts2.length === 3) {
+          return `${parts2[2].padStart(2, '0')}/${parts2[1].padStart(2, '0')}/${parts2[0]}`;
+        }
+        return String(date);
+      }
+      return String(date);
+    }
+  </script>
+
+</body>
+</html>
